@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.ImageProxy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,7 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import org.opencv.android.OpenCVLoader
-
+import org.opencv.objdetect.ArucoDetector
+import org.opencv.objdetect.DetectorParameters
+import org.opencv.objdetect.Objdetect
+import org.opencv.objdetect.Dictionary
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -132,8 +136,16 @@ fun CameraPreview(
                     .build()
 
                 imageAnalysis.setAnalyzer(executor) { imageProxy ->
-                    onFrameAnalysis(imageProxy.width, imageProxy.height)
+                    val mat = imageProxy.toGrayMat()
 
+                    val detections = detectAruco(mat)
+
+                    if (detections.isNotEmpty()) {
+                        val firstMarker = detections[0]
+                        Log.d("Aruco", "Found ID ${firstMarker.id} at ${firstMarker.centerX}, ${firstMarker.centerY}")
+                    }
+
+                    mat.release()
                     imageProxy.close()
                 }
 
@@ -156,3 +168,61 @@ fun CameraPreview(
     )
 }
 
+
+fun detectAruco(mat: org.opencv.core.Mat): List<ArucoResult> {
+    val results = mutableListOf<ArucoResult>()
+    val corners = ArrayList<org.opencv.core.Mat>()
+    val ids = org.opencv.core.Mat()
+
+    val dictionary = org.opencv.objdetect.Objdetect.getPredefinedDictionary(org.opencv.objdetect.Objdetect.DICT_4X4_50)
+    val detector = org.opencv.objdetect.ArucoDetector(dictionary)
+
+    detector.detectMarkers(mat, corners, ids)
+
+    if (!ids.empty()) {
+        for (i in 0 until ids.rows()) {
+            val id = ids.get(i, 0)[0].toInt()
+            val c = corners[i]
+            val pts = DoubleArray(8)
+            c.get(0, 0, pts)
+
+            // points are: [x0,y0 (top-left), x1,y1 (top-right), x2,y2 (bottom-right), x3,y3 (bottom-left)]
+            val tX = (pts[0] + pts[2]) / 2
+            val tY = (pts[1] + pts[3]) / 2
+            val bX = (pts[4] + pts[6]) / 2
+            val bY = (pts[5] + pts[7]) / 2
+            val cX = (pts[0] + pts[2] + pts[4] + pts[6]) / 4
+            val cY = (pts[1] + pts[3] + pts[5] + pts[7]) / 4
+
+            results.add(ArucoResult(id, tX, tY, bX, bY, cX, cY))
+        }
+    }
+
+    ids.release()
+    corners.forEach { it.release() }
+    return results
+}
+
+data class ArucoResult(
+    val id: Int,
+    val topX: Double, val topY: Double,
+    val bottomX: Double, val bottomY: Double,
+    val centerX: Double, val centerY: Double
+)
+
+fun ImageProxy.toGrayMat(): org.opencv.core.Mat {
+    val buffer = planes[0].buffer // The Y-plane is the first plane
+    val data = ByteArray(buffer.remaining())
+    buffer.get(data)
+
+    val mat = org.opencv.core.Mat(height, width, org.opencv.core.CvType.CV_8UC1)
+    mat.put(0, 0, data)
+    return mat
+}
+
+fun saveMatToCache(context: android.content.Context, mat: org.opencv.core.Mat) {
+    val file = java.io.File(context.cacheDir, "debug_frame.png")
+    // Note: Imgcodecs expects BGR or Gray. Since your mat is Gray, this works.
+    org.opencv.imgcodecs.Imgcodecs.imwrite(file.absolutePath, mat)
+    android.util.Log.d("ArucoDebug", "Frame saved to: ${file.absolutePath}")
+}
