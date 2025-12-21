@@ -24,12 +24,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.example.coderoverapp.ble.BLEManager
 import org.opencv.android.OpenCVLoader
 import org.opencv.objdetect.ArucoDetector
 import org.opencv.objdetect.DetectorParameters
 import org.opencv.objdetect.Objdetect
 import org.opencv.objdetect.Dictionary
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.Canvas
+
 
 private val arucoDictionary = Objdetect.getPredefinedDictionary(Objdetect.DICT_4X4_50)
 private val arucoDetector = ArucoDetector(arucoDictionary)
@@ -54,7 +59,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CameraScreen() {
-val density = androidx.compose.ui.platform.LocalDensity.current
+    val context = LocalContext.current
+    val bleManager = remember { BLEManager(context) }
+    val isConnected by remember { derivedStateOf { bleManager.isConnectedState.value } }
+
+    val density = LocalDensity.current
 
     androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidth = with(density) { maxWidth.toPx() }.toDouble()
@@ -66,35 +75,52 @@ val density = androidx.compose.ui.platform.LocalDensity.current
         var detectedMarker by remember { mutableStateOf<ArucoResult?>(null) }
         var imageSize by remember { mutableStateOf(org.opencv.core.Size(0.0, 0.0)) }
 
-        var targetPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+        var targetPoint by remember { mutableStateOf<Offset?>(null) }
         val launcher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
             onResult = { granted -> hasCameraPermission = granted }
         )
 
+        // Request camera permission and start BLE scan when screen appears
         LaunchedEffect(Unit) {
             launcher.launch(android.Manifest.permission.CAMERA)
+            // start scanning for BLE device (non-blocking)
+            bleManager.startScanningWithRetry()
         }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            targetPoint = if (targetPoint == null) offset else null
-                        }
+
+        // Throttle / last-sent bookkeeping
+        var lastSendMillis by remember { mutableStateOf(0L) }
+        var lastLeft by remember { mutableStateOf(Double.NaN) }
+        var lastRight by remember { mutableStateOf(Double.NaN) }
+
+        // A simple flag to request sending a stop if no marker is present
+        var lastNoMarkerSentAt by remember { mutableStateOf(0L) }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        targetPoint = if (targetPoint == null) offset else null
                     }
-            ) {
-            if (hasCameraPermission) {
-                // 1. Camera Layer
+                }
+        ) {
+            // Only show camera preview when we have permission AND BLE is connected (per your request)
+            if (hasCameraPermission && isConnected) {
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     onMarkerDetected = { result, size ->
+                        // IMPORTANT: this callback is NOT a composable context.
+                        // Do not call composables here. Only update state.
+
+                        // update state so UI layer can redraw
                         detectedMarker = result
                         imageSize = size
-                        if (targetPoint != null && result != null) {
-                            // 1. Constants
+
+                        if (targetPoint != null && result != null && imageSize.width > 0) {
+                            // compute vLeft / vRight (pure math, safe here)
                             val kw = 0.05
-                            val kv = 0.01
+                            val kv = 0.5
                             val wheelbase = 100.0 // mm
 
                             fun mapX(camX: Double, camY: Double) = (1 - (camY / imageSize.height)) * screenWidth
@@ -112,17 +138,10 @@ val density = androidx.compose.ui.platform.LocalDensity.current
                             val xBtm = mapX(result.bottomX, result.bottomY)
                             val yBtm = mapY(result.bottomX, result.bottomY)
 
-                            val aruco_px = Math.sqrt(result.area)
-                            val px_per_mm = aruco_px / 50.0
-
                             val theta = Math.atan2(yTop - yBtm, xTop - xBtm)
-
                             val angleToTarget = Math.atan2(yt - yCntr, xt - xCntr)
 
-                            // Angular Error (Difference between where we look and where the target is)
                             var angleError = angleToTarget - theta
-
-                            // Keep angleError between -PI and PI
                             while (angleError > Math.PI) angleError -= 2 * Math.PI
                             while (angleError < -Math.PI) angleError += 2 * Math.PI
 
@@ -130,52 +149,91 @@ val density = androidx.compose.ui.platform.LocalDensity.current
                             val distanceError = Math.sqrt(Math.pow(xt - xCntr, 2.0) + Math.pow(yt - yCntr, 2.0))
                             val v = kv * distanceError
 
-                            val vRight = v - (w * wheelbase / 2.0) // idk why but i had to invert it
+                            val vRight = v - (w * wheelbase / 2.0)
                             val vLeft = v + (w * wheelbase / 2.0)
 
                             Log.d("RoverControl", "V_Left: ${"%.2f".format(vLeft)} | V_Right: ${"%.2f".format(vRight)}")
-                        } 
-                    }
-                )
 
-
-                // Drawing Layer
-                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                    // 1. Draw Target (Red Dot)
-                    targetPoint?.let { point ->
-                        drawCircle(color = Color.Red, center = point, radius = 20f)
-                    }
-                    detectedMarker?.let { marker ->
-                        if (imageSize.width > 0 && imageSize.height > 0) {
-                            fun mapPoint(camX: Double, camY: Double): androidx.compose.ui.geometry.Offset {
-                                val screenX = (1 - (camY / imageSize.height)) * size.width
-                                val screenY = (camX / imageSize.width) * size.height
-                                return androidx.compose.ui.geometry.Offset(screenX.toFloat(), screenY.toFloat())
+                            // Throttle writes and only send if values changed enough
+                            val now = System.currentTimeMillis()
+                            if (now - lastSendMillis > 50) {
+                                lastSendMillis = now
+                                lastLeft = vLeft
+                                lastRight = vRight
+                                // signY — using sign of forward speed v (adjust if you'd rather use another value)
+                                bleManager.sendDrive(vLeft, vRight, Math.signum(v), 0)
                             }
-
-                            val startPoint = mapPoint(marker.bottomX, marker.bottomY)
-                            val endPoint = mapPoint(marker.topX, marker.topY)
-
-                            drawLine(color = Color.Blue, start = startPoint, end = endPoint, strokeWidth = 8f)
-                            drawCircle(color = Color.Blue, center = endPoint, radius = 15f)
+                        } else {
+                            // No marker found: update state and occasionally send a stop command.
+                            detectedMarker = null
+                            val now = System.currentTimeMillis()
+                            if (now - lastNoMarkerSentAt > 200) {
+                                lastNoMarkerSentAt = now
+                                // send a gentle stop (keep minimal sending to avoid flooding)
+                                bleManager.sendDrive(0.0, 0.0, 1.0, 0)
+                            }
                         }
                     }
+                )
+            } else {
+                // If camera permission missing OR BLE not connected -> show message and DO NOT show camera
+                val msg = when {
+                    !hasCameraPermission -> "Camera permission required"
+                    !isConnected -> "Bluetooth not connected — please connect to CarRover"
+                    else -> "Waiting..."
                 }
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(msg, color = Color.White)
+                }
+            }
 
-                // 3. UI Overlay
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(24.dp)
-                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                        .padding(16.dp)
-                ) {
-                    Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
+            // Drawing Layer (overlay). If camera preview is hidden this will usually show nothing.
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // Draw target (red dot)
+                targetPoint?.let { point ->
+                    drawCircle(color = Color.Red, center = point, radius = 20f)
                 }
+                detectedMarker?.let { marker ->
+                    if (imageSize.width > 0 && imageSize.height > 0) {
+                        fun mapPoint(camX: Double, camY: Double): Offset {
+                            val screenX = (1 - (camY / imageSize.height)) * size.width
+                            val screenY = (camX / imageSize.width) * size.height
+                            return Offset(screenX.toFloat(), screenY.toFloat())
+                        }
+
+                        val startPoint = mapPoint(marker.bottomX, marker.bottomY)
+                        val endPoint = mapPoint(marker.topX, marker.topY)
+
+                        drawLine(
+                            color = Color.Blue,
+                            start = startPoint,
+                            end = endPoint,
+                            strokeWidth = 8f
+                        )
+
+                        drawCircle(
+                            color = Color.Blue,
+                            center = endPoint,
+                            radius = 15f
+                        )
+                    }
+                }
+            }
+
+            // Bottom overlay with marker ID
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                    .padding(16.dp)
+            ) {
+                Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
             }
         }
     }
 }
+
 
 @Composable
 fun CameraPreview(

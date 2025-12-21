@@ -100,6 +100,8 @@ void setup()
   lastReceiveMillis = millis();
   stoppedByTimeout = false;
 
+  uint64_t chipid = ESP.getEfuseMac();
+  Serial.printf("ESP32 MAC Address: %04X%08X\n", (uint16_t)(chipid >> 32), (uint32_t)chipid);
   stop();
 }
 
@@ -121,7 +123,7 @@ void loop()
 
 void updateMotors(float vLeft, float vRight, float signY)
 {
-  if (vLeft == 0 && vRight == 0) 
+  if (vLeft == 0 && vRight == 0)
     stop();
   else if (signY >= 0)
     moveForward(vLeft, vRight);
