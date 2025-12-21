@@ -5,8 +5,8 @@
 int txPin = 23;
 
 int motR1Pin = 27;
-int motR2Pin = 14;
-int motL3Pin = 12;
+int motR2Pin = 26;
+int motL3Pin = 19;
 int motL4Pin = 13;
 
 const int freq = 5000;
@@ -23,7 +23,7 @@ static const char *SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab";
 static const char *CHAR_UUID = "abcd1234-1234-1234-1234-abcdef123456";
 static const char *BLE_NAME = "CarRover";
 
-void updateMotors(float x, float y);
+void updateMotors(float vLeft, float vRight, float signY);
 void moveForward(float vLeft, float vRight);
 void moveBackward(float vLeft, float vRight);
 void stop();
@@ -38,14 +38,14 @@ class XYCallbacks : public NimBLECharacteristicCallbacks
     if (val.empty())
       return;
 
-    float x = 0.0f, y = 0.0f, honk = 0.0f;
-    if (sscanf(val.c_str(), "%f , %f, %f", &x, &y, &honk) >= 2)
+    float vLeft = 0.0f, vRight = 0.0f, signY = 0.0f, honk = 0.0f;
+    if (sscanf(val.c_str(), "%f, %f, %f, %f", &vLeft, &vRight, &signY, &honk) >= 2)
     {
-      Serial.printf("PARSED -> x: %.3f  y: %.3f, honk: %f\n", x, y, honk);
+      Serial.printf("PARSED -> vLeft: %.3f  vRight: %.3f, signY: %f, honk: %f\n", vLeft, vRight, signY, honk);
       lastReceiveMillis = millis();
       stoppedByTimeout = false;
 
-      updateMotors(x, y);
+      updateMotors(vLeft, vRight, signY);
 
       // Honking
       if (honk >= 1)
@@ -119,20 +119,11 @@ void loop()
   delay(5);
 }
 
-void updateMotors(float x, float y)
+void updateMotors(float vLeft, float vRight, float signY)
 {
-  x = constrain(x, -1, 1);
-  y = constrain(y, -1, 1);
-
-  float vLeft = constrain(abs(y) * 141.5, 0, 141.5);
-  float vRight = vLeft;
-
-  if (x >= 0)
-    vRight = vRight * (1 - x);
-  else
-    vLeft = vLeft * (1 - abs(x));
-
-  if (y >= 0)
+  if (vLeft == 0 && vRight == 0) 
+    stop();
+  else if (signY >= 0)
     moveForward(vLeft, vRight);
   else
     moveBackward(vLeft, vRight);

@@ -23,6 +23,13 @@ const stick = document.getElementById("stick");
 const readout = document.getElementById("readout");
 const honkBtn = document.getElementById("honk");
 const connectBtn = document.getElementById("Connect");
+const speedSlider = document.getElementById('speed');
+const driftSlider = document.getElementById('drift');
+const speedVal = document.getElementById('speed-val');
+const driftVal = document.getElementById('drift-val');
+
+if (speedSlider) speedVal.textContent = speedSlider.value;
+if (driftSlider) driftVal.textContent = Number(driftSlider.value).toFixed(2);
 
 let dragging = false;
 const radius = container.clientWidth / 2;
@@ -72,6 +79,16 @@ document.body.addEventListener("click", () => {
     if (!bleCharacteristic && !connected) ConnectBT();
 }, { once: true });
 
+// update sliders
+speedSlider.addEventListener('input', () => {
+  speedVal.textContent = speedSlider.value;
+});
+
+driftSlider.addEventListener('input', () => {
+  driftVal.textContent = Number(driftSlider.value).toFixed(2);
+});
+
+
 // =======================
 // UI STATE HANDLER
 // =======================
@@ -85,6 +102,10 @@ function setConnected(state) {
 
         container.classList.remove('disabled');
         honkBtn.disabled = false;
+        
+        speedSlider.disabled = false;
+        driftSlider.disabled = false;
+
     } else {
         connectBtn.textContent = "Connect";
         connectBtn.disabled = false;
@@ -102,6 +123,9 @@ function setConnected(state) {
         sentCenter = true;
 
         bleCharacteristic = null;
+        
+        speedSlider.disabled = true;
+        driftSlider.disabled = true;
     }
 }
 
@@ -111,7 +135,24 @@ function setConnected(state) {
 function sendControl(honk = 0, force = false) {
     if (bleCharacteristic) {
         try {
-            const dataString = `${x*0.7},${y},${honk}`;
+            const speedSliderVal = parseInt(speedSlider.value, 10);
+            const driftSliderVal = parseFloat(driftSlider.value);
+            
+            console.log(speedSlider.value)
+            console.log(driftSlider.value)
+            
+            let speed = y * speedSliderVal;
+            let drift = driftSliderVal * x;
+            
+            let vLeft = Math.abs(speed);
+            let vRight = vLeft;
+            
+              if (drift >= 0)
+                vRight = vRight * (1 - drift);
+            else
+                vLeft = vLeft * (1 - Math.abs(drift));
+            
+            const dataString = `${vLeft},${vRight},${Math.sign(y)},${honk}`;
             const encoder = new TextEncoder();
             bleCharacteristic.writeValue(encoder.encode(dataString))
                 .catch(error => console.log("BLE send error", error));
