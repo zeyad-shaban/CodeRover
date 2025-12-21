@@ -86,8 +86,49 @@ fun CameraScreen() {
                     detectedMarker = result
                     imageSize = size
                     if (targetPoint != null && result != null) {
-                        Log.e("yay", "yay")
-                    }
+                        // 1. Constants
+                        val kw = 0.05
+                        val kv = 0.01
+                        val wheelbase = 100.0 // mm
+
+                        fun mapX(camX: Double, camY: Double) = (1 - (camY / imageSize.height)) * screenWidth
+                        fun mapY(camX: Double, camY: Double) = (camX / imageSize.width) * screenHeight
+
+                        val xt = targetPoint!!.x.toDouble()
+                        val yt = targetPoint!!.y.toDouble()
+
+                        val xCntr = mapX(result.centerX, result.centerY)
+                        val yCntr = mapY(result.centerX, result.centerY)
+
+                        val xTop = mapX(result.topX, result.topY)
+                        val yTop = mapY(result.topX, result.topY)
+
+                        val xBtm = mapX(result.bottomX, result.bottomY)
+                        val yBtm = mapY(result.bottomX, result.bottomY)
+
+                        val aruco_px = Math.sqrt(result.area)
+                        val px_per_mm = aruco_px / 50.0
+
+                        val theta = Math.atan2(yTop - yBtm, xTop - xBtm)
+
+                        val angleToTarget = Math.atan2(yt - yCntr, xt - xCntr)
+
+                        // Angular Error (Difference between where we look and where the target is)
+                        var angleError = angleToTarget - theta
+
+                        // Keep angleError between -PI and PI
+                        while (angleError > Math.PI) angleError -= 2 * Math.PI
+                        while (angleError < -Math.PI) angleError += 2 * Math.PI
+
+                        val w = kw * angleError
+                        val distanceError = Math.sqrt(Math.pow(xt - xCntr, 2.0) + Math.pow(yt - yCntr, 2.0))
+                        val v = kv * distanceError
+
+                        val vRight = v + (w * wheelbase / 2.0)
+                        val vLeft = v - (w * wheelbase / 2.0)
+
+                        Log.d("RoverControl", "V_Left: ${"%.2f".format(vLeft)} | V_Right: ${"%.2f".format(vRight)}")
+                    }                    }
                 }
             )
 
