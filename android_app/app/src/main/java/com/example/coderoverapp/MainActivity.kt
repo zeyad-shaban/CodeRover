@@ -29,6 +29,8 @@ import org.opencv.objdetect.DetectorParameters
 import org.opencv.objdetect.Objdetect
 import org.opencv.objdetect.Dictionary
 
+private val arucoDictionary = Objdetect.getPredefinedDictionary(Objdetect.DICT_4X4_50)
+private val arucoDetector = ArucoDetector(arucoDictionary)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,12 +52,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CameraScreen() {
-    val context = LocalContext.current
     var hasCameraPermission by remember { mutableStateOf(false) }
 
-    // State variables to hold the "Shape" of the image
-    var imageWidth by remember { mutableIntStateOf(0) }
-    var imageHeight by remember { mutableIntStateOf(0) }
+    // We store the detected result in a state to trigger a redraw of the Canvas
+    var detectedMarker by remember { mutableStateOf<ArucoResult?>(null) }
+    var imageSize by remember { mutableStateOf(org.opencv.core.Size(0.0, 0.0)) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -68,47 +69,77 @@ fun CameraScreen() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (hasCameraPermission) {
-            // 1. The Camera Stream
+            // 1. Camera Layer
             CameraPreview(
                 modifier = Modifier.fillMaxSize(),
-                onFrameAnalysis = { w, h ->
-                    imageWidth = w
-                    imageHeight = h
+                onMarkerDetected = { result, size ->
+                    detectedMarker = result
+                    imageSize = size
                 }
             )
 
-            // 2. The UI Overlay (The Styling you like)
+            // 2. Drawing Layer (The Blue Line and Dot)
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                detectedMarker?.let { marker ->
+                    if (imageSize.width > 0 && imageSize.height > 0) {
+
+                        // --- COORDINATE MAPPING ---
+                        // Note: CameraX frames usually arrive rotated 90 deg.
+                        // For a quick fix in Portrait:
+                        // Scale X = ScreenWidth / ImageHeight
+                        // Scale Y = ScreenHeight / ImageWidth
+                        val scaleX = size.width / imageSize.height.toFloat()
+                        val scaleY = size.height / imageSize.width.toFloat()
+
+                        // Map Camera (x, y) to Screen (x, y) assuming 90deg rotation
+                        // New Screen X = (1 - ImageY/ImageHeight) * ScreenWidth
+                        // New Screen Y = (ImageX/ImageWidth) * ScreenHeight
+
+                        fun mapPoint(camX: Double, camY: Double): androidx.compose.ui.geometry.Offset {
+                            val screenX = (1 - (camY / imageSize.height)) * size.width
+                            val screenY = (camX / imageSize.width) * size.height
+                            return androidx.compose.ui.geometry.Offset(screenX.toFloat(), screenY.toFloat())
+                        }
+
+                        val startPoint = mapPoint(marker.bottomX, marker.bottomY) // Back
+                        val endPoint = mapPoint(marker.topX, marker.topY)     // Front (Blue Dot)
+
+                        // Draw the Blue Line
+                        drawLine(
+                            color = Color.Blue,
+                            start = startPoint,
+                            end = endPoint,
+                            strokeWidth = 8f
+                        )
+
+                        // Draw the Blue Dot at the Front
+                        drawCircle(
+                            color = Color.Blue,
+                            center = endPoint,
+                            radius = 15f
+                        )
+                    }
+                }
+            }
+
+            // 3. UI Overlay
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(24.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
                     .padding(16.dp)
             ) {
-                Text(
-                    text = "Resolution: $imageWidth x $imageHeight px",
-                    color = androidx.compose.ui.graphics.Color.White,
-                    style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
-                )
+                Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
             }
-
-        } else {
-            Text(
-                text = "We need camera permission.",
-                modifier = Modifier.align(Alignment.Center)
-            )
         }
     }
 }
 
-
 @Composable
 fun CameraPreview(
     modifier: Modifier = Modifier,
-    onFrameAnalysis: (width: Int, height: Int) -> Unit // A callback to send data back to the UI
+    onMarkerDetected: (ArucoResult?, org.opencv.core.Size) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -137,18 +168,17 @@ fun CameraPreview(
 
                 imageAnalysis.setAnalyzer(executor) { imageProxy ->
                     val mat = imageProxy.toGrayMat()
-
                     val detections = detectAruco(mat)
 
                     if (detections.isNotEmpty()) {
-                        val firstMarker = detections[0]
-                        Log.d("Aruco", "Found ID ${firstMarker.id} at ${firstMarker.centerX}, ${firstMarker.centerY}")
+                        onMarkerDetected(detections[0], org.opencv.core.Size(mat.width().toDouble(), mat.height().toDouble()))
+                    } else {
+                        onMarkerDetected(null, org.opencv.core.Size(0.0, 0.0))
                     }
 
                     mat.release()
                     imageProxy.close()
                 }
-
                 // 3. Bind everything to the phone's lifecycle
                 try {
                     cameraProvider.unbindAll()
@@ -174,25 +204,30 @@ fun detectAruco(mat: org.opencv.core.Mat): List<ArucoResult> {
     val corners = ArrayList<org.opencv.core.Mat>()
     val ids = org.opencv.core.Mat()
 
-    val dictionary = org.opencv.objdetect.Objdetect.getPredefinedDictionary(org.opencv.objdetect.Objdetect.DICT_4X4_50)
-    val detector = org.opencv.objdetect.ArucoDetector(dictionary)
-
-    detector.detectMarkers(mat, corners, ids)
+    arucoDetector.detectMarkers(mat, corners, ids)
 
     if (!ids.empty()) {
         for (i in 0 until ids.rows()) {
             val id = ids.get(i, 0)[0].toInt()
             val c = corners[i]
-            val pts = DoubleArray(8)
+
+            // FIX: Use FloatArray (size 8 for the 4 corners x,y)
+            val pts = FloatArray(8)
             c.get(0, 0, pts)
 
-            // points are: [x0,y0 (top-left), x1,y1 (top-right), x2,y2 (bottom-right), x3,y3 (bottom-left)]
-            val tX = (pts[0] + pts[2]) / 2
-            val tY = (pts[1] + pts[3]) / 2
-            val bX = (pts[4] + pts[6]) / 2
-            val bY = (pts[5] + pts[7]) / 2
-            val cX = (pts[0] + pts[2] + pts[4] + pts[6]) / 4
-            val cY = (pts[1] + pts[3] + pts[5] + pts[7]) / 4
+            // Convert Floats to Double for your math
+            val x0 = pts[0].toDouble(); val y0 = pts[1].toDouble() // TL
+            val x1 = pts[2].toDouble(); val y1 = pts[3].toDouble() // TR
+            val x2 = pts[4].toDouble(); val y2 = pts[5].toDouble() // BR
+            val x3 = pts[6].toDouble(); val y3 = pts[7].toDouble() // BL
+
+            // Calculate points
+            val tX = (x0 + x1) / 2
+            val tY = (y0 + y1) / 2
+            val bX = (x2 + x3) / 2
+            val bY = (y2 + y3) / 2
+            val cX = (x0 + x1 + x2 + x3) / 4
+            val cY = (y0 + y1 + y2 + y3) / 4
 
             results.add(ArucoResult(id, tX, tY, bX, bY, cX, cY))
         }
@@ -202,7 +237,6 @@ fun detectAruco(mat: org.opencv.core.Mat): List<ArucoResult> {
     corners.forEach { it.release() }
     return results
 }
-
 data class ArucoResult(
     val id: Int,
     val topX: Double, val topY: Double,
