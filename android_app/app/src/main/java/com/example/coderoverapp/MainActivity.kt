@@ -20,8 +20,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.coderoverapp.ui.theme.CodeRoverAppTheme
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import org.opencv.android.OpenCVLoader
 import org.opencv.objdetect.ArucoDetector
@@ -58,6 +60,7 @@ fun CameraScreen() {
     var detectedMarker by remember { mutableStateOf<ArucoResult?>(null) }
     var imageSize by remember { mutableStateOf(org.opencv.core.Size(0.0, 0.0)) }
 
+    var targetPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted -> hasCameraPermission = granted }
@@ -66,8 +69,15 @@ fun CameraScreen() {
     LaunchedEffect(Unit) {
         launcher.launch(android.Manifest.permission.CAMERA)
     }
-
-    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        targetPoint = if (targetPoint == null) offset else null
+                    }
+                }
+        ) {
         if (hasCameraPermission) {
             // 1. Camera Layer
             CameraPreview(
@@ -75,49 +85,32 @@ fun CameraScreen() {
                 onMarkerDetected = { result, size ->
                     detectedMarker = result
                     imageSize = size
+                    if (targetPoint != null && result != null) {
+                        Log.e("yay", "yay")
+                    }
                 }
             )
 
-            // 2. Drawing Layer (The Blue Line and Dot)
+
+            // Drawing Layer
             androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                // 1. Draw Target (Red Dot)
+                targetPoint?.let { point ->
+                    drawCircle(color = Color.Red, center = point, radius = 20f)
+                }
                 detectedMarker?.let { marker ->
                     if (imageSize.width > 0 && imageSize.height > 0) {
-
-                        // --- COORDINATE MAPPING ---
-                        // Note: CameraX frames usually arrive rotated 90 deg.
-                        // For a quick fix in Portrait:
-                        // Scale X = ScreenWidth / ImageHeight
-                        // Scale Y = ScreenHeight / ImageWidth
-                        val scaleX = size.width / imageSize.height.toFloat()
-                        val scaleY = size.height / imageSize.width.toFloat()
-
-                        // Map Camera (x, y) to Screen (x, y) assuming 90deg rotation
-                        // New Screen X = (1 - ImageY/ImageHeight) * ScreenWidth
-                        // New Screen Y = (ImageX/ImageWidth) * ScreenHeight
-
                         fun mapPoint(camX: Double, camY: Double): androidx.compose.ui.geometry.Offset {
                             val screenX = (1 - (camY / imageSize.height)) * size.width
                             val screenY = (camX / imageSize.width) * size.height
                             return androidx.compose.ui.geometry.Offset(screenX.toFloat(), screenY.toFloat())
                         }
 
-                        val startPoint = mapPoint(marker.bottomX, marker.bottomY) // Back
-                        val endPoint = mapPoint(marker.topX, marker.topY)     // Front (Blue Dot)
+                        val startPoint = mapPoint(marker.bottomX, marker.bottomY)
+                        val endPoint = mapPoint(marker.topX, marker.topY)
 
-                        // Draw the Blue Line
-                        drawLine(
-                            color = Color.Blue,
-                            start = startPoint,
-                            end = endPoint,
-                            strokeWidth = 8f
-                        )
-
-                        // Draw the Blue Dot at the Front
-                        drawCircle(
-                            color = Color.Blue,
-                            center = endPoint,
-                            radius = 15f
-                        )
+                        drawLine(color = Color.Blue, start = startPoint, end = endPoint, strokeWidth = 8f)
+                        drawCircle(color = Color.Blue, center = endPoint, radius = 15f)
                     }
                 }
             }
@@ -229,7 +222,8 @@ fun detectAruco(mat: org.opencv.core.Mat): List<ArucoResult> {
             val cX = (x0 + x1 + x2 + x3) / 4
             val cY = (y0 + y1 + y2 + y3) / 4
 
-            results.add(ArucoResult(id, tX, tY, bX, bY, cX, cY))
+            val area = org.opencv.imgproc.Imgproc.contourArea(c)
+            results.add(ArucoResult(id, tX, tY, bX, bY, cX, cY, area))
         }
     }
 
@@ -241,7 +235,8 @@ data class ArucoResult(
     val id: Int,
     val topX: Double, val topY: Double,
     val bottomX: Double, val bottomY: Double,
-    val centerX: Double, val centerY: Double
+    val centerX: Double, val centerY: Double,
+    val area: Double
 )
 
 fun ImageProxy.toGrayMat(): org.opencv.core.Mat {
@@ -252,11 +247,4 @@ fun ImageProxy.toGrayMat(): org.opencv.core.Mat {
     val mat = org.opencv.core.Mat(height, width, org.opencv.core.CvType.CV_8UC1)
     mat.put(0, 0, data)
     return mat
-}
-
-fun saveMatToCache(context: android.content.Context, mat: org.opencv.core.Mat) {
-    val file = java.io.File(context.cacheDir, "debug_frame.png")
-    // Note: Imgcodecs expects BGR or Gray. Since your mat is Gray, this works.
-    org.opencv.imgcodecs.Imgcodecs.imwrite(file.absolutePath, mat)
-    android.util.Log.d("ArucoDebug", "Frame saved to: ${file.absolutePath}")
 }
