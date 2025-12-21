@@ -54,117 +54,124 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CameraScreen() {
-    var hasCameraPermission by remember { mutableStateOf(false) }
+val density = androidx.compose.ui.platform.LocalDensity.current
 
-    // We store the detected result in a state to trigger a redraw of the Canvas
-    var detectedMarker by remember { mutableStateOf<ArucoResult?>(null) }
-    var imageSize by remember { mutableStateOf(org.opencv.core.Size(0.0, 0.0)) }
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val screenWidth = with(density) { maxWidth.toPx() }.toDouble()
+        val screenHeight = with(density) { maxHeight.toPx() }.toDouble()
 
-    var targetPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted -> hasCameraPermission = granted }
-    )
+        var hasCameraPermission by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        launcher.launch(android.Manifest.permission.CAMERA)
-    }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        targetPoint = if (targetPoint == null) offset else null
-                    }
-                }
-        ) {
-        if (hasCameraPermission) {
-            // 1. Camera Layer
-            CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                onMarkerDetected = { result, size ->
-                    detectedMarker = result
-                    imageSize = size
-                    if (targetPoint != null && result != null) {
-                        // 1. Constants
-                        val kw = 0.05
-                        val kv = 0.01
-                        val wheelbase = 100.0 // mm
+        // We store the detected result in a state to trigger a redraw of the Canvas
+        var detectedMarker by remember { mutableStateOf<ArucoResult?>(null) }
+        var imageSize by remember { mutableStateOf(org.opencv.core.Size(0.0, 0.0)) }
 
-                        fun mapX(camX: Double, camY: Double) = (1 - (camY / imageSize.height)) * screenWidth
-                        fun mapY(camX: Double, camY: Double) = (camX / imageSize.width) * screenHeight
+        var targetPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+        val launcher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission(),
+            onResult = { granted -> hasCameraPermission = granted }
+        )
 
-                        val xt = targetPoint!!.x.toDouble()
-                        val yt = targetPoint!!.y.toDouble()
-
-                        val xCntr = mapX(result.centerX, result.centerY)
-                        val yCntr = mapY(result.centerX, result.centerY)
-
-                        val xTop = mapX(result.topX, result.topY)
-                        val yTop = mapY(result.topX, result.topY)
-
-                        val xBtm = mapX(result.bottomX, result.bottomY)
-                        val yBtm = mapY(result.bottomX, result.bottomY)
-
-                        val aruco_px = Math.sqrt(result.area)
-                        val px_per_mm = aruco_px / 50.0
-
-                        val theta = Math.atan2(yTop - yBtm, xTop - xBtm)
-
-                        val angleToTarget = Math.atan2(yt - yCntr, xt - xCntr)
-
-                        // Angular Error (Difference between where we look and where the target is)
-                        var angleError = angleToTarget - theta
-
-                        // Keep angleError between -PI and PI
-                        while (angleError > Math.PI) angleError -= 2 * Math.PI
-                        while (angleError < -Math.PI) angleError += 2 * Math.PI
-
-                        val w = kw * angleError
-                        val distanceError = Math.sqrt(Math.pow(xt - xCntr, 2.0) + Math.pow(yt - yCntr, 2.0))
-                        val v = kv * distanceError
-
-                        val vRight = v + (w * wheelbase / 2.0)
-                        val vLeft = v - (w * wheelbase / 2.0)
-
-                        Log.d("RoverControl", "V_Left: ${"%.2f".format(vLeft)} | V_Right: ${"%.2f".format(vRight)}")
-                    }                    }
-                }
-            )
-
-
-            // Drawing Layer
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                // 1. Draw Target (Red Dot)
-                targetPoint?.let { point ->
-                    drawCircle(color = Color.Red, center = point, radius = 20f)
-                }
-                detectedMarker?.let { marker ->
-                    if (imageSize.width > 0 && imageSize.height > 0) {
-                        fun mapPoint(camX: Double, camY: Double): androidx.compose.ui.geometry.Offset {
-                            val screenX = (1 - (camY / imageSize.height)) * size.width
-                            val screenY = (camX / imageSize.width) * size.height
-                            return androidx.compose.ui.geometry.Offset(screenX.toFloat(), screenY.toFloat())
-                        }
-
-                        val startPoint = mapPoint(marker.bottomX, marker.bottomY)
-                        val endPoint = mapPoint(marker.topX, marker.topY)
-
-                        drawLine(color = Color.Blue, start = startPoint, end = endPoint, strokeWidth = 8f)
-                        drawCircle(color = Color.Blue, center = endPoint, radius = 15f)
-                    }
-                }
-            }
-
-            // 3. UI Overlay
+        LaunchedEffect(Unit) {
+            launcher.launch(android.Manifest.permission.CAMERA)
+        }
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(24.dp)
-                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                    .padding(16.dp)
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            targetPoint = if (targetPoint == null) offset else null
+                        }
+                    }
             ) {
-                Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
+            if (hasCameraPermission) {
+                // 1. Camera Layer
+                CameraPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    onMarkerDetected = { result, size ->
+                        detectedMarker = result
+                        imageSize = size
+                        if (targetPoint != null && result != null) {
+                            // 1. Constants
+                            val kw = 0.05
+                            val kv = 0.01
+                            val wheelbase = 100.0 // mm
+
+                            fun mapX(camX: Double, camY: Double) = (1 - (camY / imageSize.height)) * screenWidth
+                            fun mapY(camX: Double, camY: Double) = (camX / imageSize.width) * screenHeight
+
+                            val xt = targetPoint!!.x.toDouble()
+                            val yt = targetPoint!!.y.toDouble()
+
+                            val xCntr = mapX(result.centerX, result.centerY)
+                            val yCntr = mapY(result.centerX, result.centerY)
+
+                            val xTop = mapX(result.topX, result.topY)
+                            val yTop = mapY(result.topX, result.topY)
+
+                            val xBtm = mapX(result.bottomX, result.bottomY)
+                            val yBtm = mapY(result.bottomX, result.bottomY)
+
+                            val aruco_px = Math.sqrt(result.area)
+                            val px_per_mm = aruco_px / 50.0
+
+                            val theta = Math.atan2(yTop - yBtm, xTop - xBtm)
+
+                            val angleToTarget = Math.atan2(yt - yCntr, xt - xCntr)
+
+                            // Angular Error (Difference between where we look and where the target is)
+                            var angleError = angleToTarget - theta
+
+                            // Keep angleError between -PI and PI
+                            while (angleError > Math.PI) angleError -= 2 * Math.PI
+                            while (angleError < -Math.PI) angleError += 2 * Math.PI
+
+                            val w = kw * angleError
+                            val distanceError = Math.sqrt(Math.pow(xt - xCntr, 2.0) + Math.pow(yt - yCntr, 2.0))
+                            val v = kv * distanceError
+
+                            val vRight = v - (w * wheelbase / 2.0) // idk why but i had to invert it
+                            val vLeft = v + (w * wheelbase / 2.0)
+
+                            Log.d("RoverControl", "V_Left: ${"%.2f".format(vLeft)} | V_Right: ${"%.2f".format(vRight)}")
+                        } 
+                    }
+                )
+
+
+                // Drawing Layer
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    // 1. Draw Target (Red Dot)
+                    targetPoint?.let { point ->
+                        drawCircle(color = Color.Red, center = point, radius = 20f)
+                    }
+                    detectedMarker?.let { marker ->
+                        if (imageSize.width > 0 && imageSize.height > 0) {
+                            fun mapPoint(camX: Double, camY: Double): androidx.compose.ui.geometry.Offset {
+                                val screenX = (1 - (camY / imageSize.height)) * size.width
+                                val screenY = (camX / imageSize.width) * size.height
+                                return androidx.compose.ui.geometry.Offset(screenX.toFloat(), screenY.toFloat())
+                            }
+
+                            val startPoint = mapPoint(marker.bottomX, marker.bottomY)
+                            val endPoint = mapPoint(marker.topX, marker.topY)
+
+                            drawLine(color = Color.Blue, start = startPoint, end = endPoint, strokeWidth = 8f)
+                            drawCircle(color = Color.Blue, center = endPoint, radius = 15f)
+                        }
+                    }
+                }
+
+                // 3. UI Overlay
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(24.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .padding(16.dp)
+                ) {
+                    Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
+                }
             }
         }
     }
