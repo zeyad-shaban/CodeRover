@@ -1,0 +1,142 @@
+body {
+    background: #111;
+    color: #fff;
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    user-select: none;
+}
+
+#joystick-container {
+    width: 200px;
+    height: 200px;
+    background: #222;
+    border-radius: 50%;
+    position: relative;
+    touch-action: none;
+    transition: opacity 0.18s ease;
+}
+
+#joystick-container.disabled {
+    opacity: 0.3;
+    pointer-events: none; /* Prevents touch/mouse events */
+    filter: grayscale(1);
+}
+
+#stick {
+    width: 70px;
+    height: 70px;
+    background: #4caf50;
+    border-radius: 50%;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    transition: left 0.02s linear, top 0.02s linear;
+}
+
+#honk {
+    margin-top: 30px;
+    padding: 15px 40px;
+    font-size: 20px;
+    border: none;
+    border-radius: 8px;
+    background: #ff5252;
+    color: white;
+    cursor: pointer;
+}
+
+/* disabled honk */
+#honk:disabled {
+    background: #6b2f2f;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+#Connect {
+    margin-top: 30px;
+    padding: 20px 40px;
+    font-size: 20px;
+    border: none;
+    border-radius: 10px;
+    background: #1e159b;
+    color: rgb(26, 74, 95);
+    cursor: pointer;
+}
+
+/* Connected state style */
+#Connect.connected {
+    background: #4caf50; /* Green */
+    color: white;
+    cursor: default;
+    opacity: 0.8;
+}
+
+/* disabled Connect (just visual) */
+#Connect:disabled {
+    opacity: 0.9;
+    cursor: default;
+}
+
+#readout {
+    margin-top: 15px;
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+#log-icon {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    font-size: 30px;
+    cursor: pointer;
+    background: #333;
+    padding: 10px;
+    border-radius: 50%;
+    z-index: 100;
+}
+
+/* Modal Background */
+.modal {
+    display: none; 
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.8);
+}
+
+/* Modal Box */
+.modal-content {
+    background-color: #222;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #444;
+    width: 80%;
+    max-width: 400px;
+    border-radius: 10px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* Close Button */
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover { color: white; }
+
+.log-entry {
+    border-bottom: 1px solid #333;
+    padding: 5px 0;
+    font-size: 12px;
+}

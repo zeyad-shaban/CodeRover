@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>RC Car Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="static/style.css?v=1">
+</head>
+
+<body>
+    <h2>RC Car Controller</h2>
+    
+    <div id="log-icon" onclick="openModal()">📋</div>
+    <div id="logModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h3>Recent Activity</h3>
+            <div id="log-container">Loading logs...</div>
+        </div>
+    </div>
+
+    <div id="joystick-container" class="disabled">
+        <div id="stick"></div>
+    </div>
+
+    <button id="honk" disabled>HONK</button>
+    <button id="Connect">Connect</button>
+
+    <div id="readout">x: 0.00 | y: 0.00</div>
+
+    <script src="static/index.js?v=2"></script>
+</body>
+
+</html>
