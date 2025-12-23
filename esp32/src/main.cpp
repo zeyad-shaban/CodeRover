@@ -23,9 +23,12 @@ static const char *SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab";
 static const char *CHAR_UUID = "abcd1234-1234-1234-1234-abcdef123456";
 static const char *BLE_NAME = "CarRover";
 
-void updateMotors(float vLeft, float vRight, float signY);
-void moveForward(float vLeft, float vRight);
-void moveBackward(float vLeft, float vRight);
+void updateMotors(float vLeft, float vRight);
+void moveForwardRight(float vRight);
+void moveForwardLeft(float vLeft);
+void moveBackwardRight(float vRight);
+void moveBackwardLeft(float vLeft);
+
 void stop();
 
 class XYCallbacks : public NimBLECharacteristicCallbacks
@@ -38,14 +41,14 @@ class XYCallbacks : public NimBLECharacteristicCallbacks
     if (val.empty())
       return;
 
-    float vLeft = 0.0f, vRight = 0.0f, signY = 0.0f, honk = 0.0f;
-    if (sscanf(val.c_str(), "%f, %f, %f, %f", &vLeft, &vRight, &signY, &honk) >= 2)
+    float vLeft = 0.0f, vRight = 0.0f, honk = 0.0f;
+    if (sscanf(val.c_str(), "%f, %f, %f", &vLeft, &vRight, &honk) >= 2)
     {
-      Serial.printf("PARSED -> vLeft: %.3f  vRight: %.3f, signY: %f, honk: %f\n", vLeft, vRight, signY, honk);
+      Serial.printf("PARSED -> vLeft: %.3f  vRight: %.3f, honk: %f\n", vLeft, vRight, honk);
       lastReceiveMillis = millis();
       stoppedByTimeout = false;
 
-      updateMotors(vLeft, vRight, signY);
+      updateMotors(vLeft, vRight);
 
       // Honking
       if (honk >= 1)
@@ -121,34 +124,44 @@ void loop()
   delay(5);
 }
 
-void updateMotors(float vLeft, float vRight, float signY)
+void updateMotors(float vLeft, float vRight)
 {
   if (vLeft == 0 && vRight == 0)
     stop();
-  else if (signY >= 0)
-    moveForward(vLeft, vRight);
+
+  if (vLeft > 0)
+    moveForwardLeft(vLeft);
   else
-    moveBackward(vLeft, vRight);
+    moveBackwardLeft(abs(vLeft));
+
+  if (vRight > 0)
+    moveForwardRight(vRight);
+  else
+    moveBackwardRight(abs(vRight));
 }
 
-void moveForward(float vLeft, float vRight)
+// Right
+void moveForwardRight(float vRight)
 {
-  // Right
   ledcWrite(motRight1Chan, 0);
   ledcWrite(motRight2Chan, vRight);
+}
 
-  // Left
+void moveBackwardRight(float vRight)
+{
+  ledcWrite(motRight1Chan, vRight);
+  ledcWrite(motRight2Chan, 0);
+}
+
+// Left
+void moveForwardLeft(float vLeft)
+{
   ledcWrite(motLeft3Chan, 0);
   ledcWrite(motLeft4Chan, vLeft);
 }
 
-void moveBackward(float vLeft, float vRight)
+void moveBackwardLeft(float vLeft)
 {
-  // Right
-  ledcWrite(motRight1Chan, vRight);
-  ledcWrite(motRight2Chan, 0);
-
-  // left
   ledcWrite(motLeft3Chan, vLeft);
   ledcWrite(motLeft4Chan, 0);
 }

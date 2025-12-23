@@ -138,13 +138,10 @@ function sendControl(honk = 0, force = false) {
             const speedSliderVal = parseInt(speedSlider.value, 10);
             const driftSliderVal = parseFloat(driftSlider.value);
             
-            console.log(speedSlider.value)
-            console.log(driftSlider.value)
-            
             let speed = y * speedSliderVal;
             let drift = driftSliderVal * x;
             
-            let vLeft = Math.abs(speed);
+            let vLeft = speed;
             let vRight = vLeft;
             
               if (drift >= 0)
@@ -152,7 +149,7 @@ function sendControl(honk = 0, force = false) {
             else
                 vLeft = vLeft * (1 - Math.abs(drift));
             
-            const dataString = `${vLeft},${vRight},${Math.sign(y)},${honk}`;
+            const dataString = `${vLeft},${vRight},${honk}`;
             const encoder = new TextEncoder();
             bleCharacteristic.writeValue(encoder.encode(dataString))
                 .catch(error => console.log("BLE send error", error));
