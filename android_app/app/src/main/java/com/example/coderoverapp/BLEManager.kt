@@ -48,7 +48,7 @@ class BLEManager(private val context: Context) {
 
     // Public: start scanning and retry until connected (or until stopScanning called)
     @SuppressLint("MissingPermission")
-    fun startScanningWithRetry(scanWindowMs: Long = 5000L, retryDelayMs: Long = 1000L) {
+    fun startScanningWithRetry(scanWindowMs: Long = 10000L, retryDelayMs: Long = 1000L) {
         // If already connected, nothing to do
         if (isConnectedState.value) {
             Log.d(TAG, "Already connected - skipping scan")
@@ -231,12 +231,12 @@ class BLEManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun sendDrive(vLeft: Double, vRight: Double, signY: Double, honk: Int = 0): Boolean {
+    fun sendDrive(vLeft: Double, vRight: Double, honk: Int = 0): Boolean {
         val chr = writeCharacteristic ?: run {
             Log.w(TAG, "sendDrive: characteristic not ready")
             return false
         }
-        val payload = String.format(Locale.US, "%.3f, %.3f, %.3f, %d", vLeft, vRight, signY, honk)
+        val payload = String.format(Locale.US, "%.3f, %.3f, %d", vLeft, vRight, honk)
         Log.d(TAG, "sendDrive -> $payload")
         chr.value = payload.toByteArray(Charsets.UTF_8)
         return try {

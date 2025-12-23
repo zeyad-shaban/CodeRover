@@ -45,7 +45,6 @@ class MainActivity : ComponentActivity() {
             Log.i("OpenCV", "OpenCV loaded (initDebug).")
         } else {
             Log.e("OpenCV", "OpenCV initialization failed!")
-            // You can try initAsync or show error — but initDebug() usually works with AAR
         }
 
         enableEdgeToEdge()
@@ -92,9 +91,8 @@ fun CameraScreen() {
         var lastSendMillis by remember { mutableStateOf(0L) }
         var lastLeft by remember { mutableStateOf(Double.NaN) }
         var lastRight by remember { mutableStateOf(Double.NaN) }
-
-        // A simple flag to request sending a stop if no marker is present
-        var lastNoMarkerSentAt by remember { mutableStateOf(0L) }
+        var vLeft by remember { mutableDoubleStateOf(0.0) }
+        var vRight by remember { mutableDoubleStateOf(0.0) }
 
         Box(
             modifier = Modifier
@@ -105,8 +103,8 @@ fun CameraScreen() {
                     }
                 }
         ) {
-            // Only show camera preview when we have permission AND BLE is connected (per your request)
-            if (hasCameraPermission && isConnected) {
+            // Only show camera preview when we have permission AND BLE is connected
+            if (hasCameraPermission) {
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     onMarkerDetected = { result, size ->
@@ -119,8 +117,8 @@ fun CameraScreen() {
 
                         if (targetPoint != null && result != null && imageSize.width > 0) {
                             // compute vLeft / vRight (pure math, safe here)
-                            val kw = 0.05
-                            val kv = 0.5
+                            val kw = 0.6
+                            val kv = 0.3
                             val wheelbase = 100.0 // mm
 
                             fun mapX(camX: Double, camY: Double) = (1 - (camY / imageSize.height)) * screenWidth
@@ -147,32 +145,30 @@ fun CameraScreen() {
 
                             val w = kw * angleError
                             val distanceError = Math.sqrt(Math.pow(xt - xCntr, 2.0) + Math.pow(yt - yCntr, 2.0))
+                            val forwardScale = if (Math.abs(angleError) > Math.PI / 4) 0.0 else 1.0;
                             val v = kv * distanceError
 
-                            val vRight = v - (w * wheelbase / 2.0)
-                            val vLeft = v + (w * wheelbase / 2.0)
+                            vRight = v - (w * wheelbase / 2.0)
+                            vLeft = v + (w * wheelbase / 2.0)
 
                             Log.d("RoverControl", "V_Left: ${"%.2f".format(vLeft)} | V_Right: ${"%.2f".format(vRight)}")
 
-                            // Throttle writes and only send if values changed enough
-                            val now = System.currentTimeMillis()
-                            if (now - lastSendMillis > 50) {
-                                lastSendMillis = now
-                                lastLeft = vLeft
-                                lastRight = vRight
-                                // signY — using sign of forward speed v (adjust if you'd rather use another value)
-                                bleManager.sendDrive(vLeft, vRight, Math.signum(v), 0)
+                            if(isConnected) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastSendMillis > 50) {
+                                    lastSendMillis = now
+                                    lastLeft = vLeft
+                                    lastRight = vRight
+                                    bleManager.sendDrive(vLeft, vRight, 0)
+                                }
                             }
                         } else {
-                            // No marker found: update state and occasionally send a stop command.
-                            detectedMarker = null
-                            val now = System.currentTimeMillis()
-                            if (now - lastNoMarkerSentAt > 200) {
-                                lastNoMarkerSentAt = now
-                                // send a gentle stop (keep minimal sending to avoid flooding)
-                                bleManager.sendDrive(0.0, 0.0, 1.0, 0)
-                            }
+                            vRight = 0.0;
+                            vLeft = 0.0;
                         }
+                        
+                        if (result == null) 
+                            detectedMarker = null;
                     }
                 )
             } else {
@@ -220,7 +216,6 @@ fun CameraScreen() {
                 }
             }
 
-            // Bottom overlay with marker ID
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -228,7 +223,11 @@ fun CameraScreen() {
                     .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
                     .padding(16.dp)
             ) {
-                Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}", color = Color.White)
+                if (!isConnected) {
+                    Text(text = "BLE not connected..., , vl: ${"%.2f".format(vLeft)}, vr: ${"%.2f".format(vRight)}", color = Color.White)
+                } else {
+                    Text(text = "Marker: ${detectedMarker?.id ?: "Searching..."}, vl: ${"%.2f".format(vLeft)}, vr: ${"%.2f".format(vRight)}", color = Color.White)
+                }
             }
         }
     }
